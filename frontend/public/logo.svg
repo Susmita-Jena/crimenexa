@@ -1,0 +1,73 @@
+<svg width="520" height="520" viewBox="0 0 520 520" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ringGrad" x1="60" y1="60" x2="460" y2="460" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F75EEA"/>
+      <stop offset="0.5" stop-color="#D950FF"/>
+      <stop offset="1" stop-color="#8D7CFF"/>
+    </linearGradient>
+    <radialGradient id="coreGrad" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(260 260) rotate(90) scale(200)">
+      <stop stop-color="#FF6BE8" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#FF6BE8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <g opacity="0.95">
+    <circle cx="260" cy="260" r="154" fill="url(#coreGrad)"/>
+
+    <g stroke="url(#ringGrad)" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M260 84V188"/>
+      <path d="M260 332V436"/>
+      <path d="M84 260H188"/>
+      <path d="M332 260H436"/>
+
+      <path d="M130 130L205 205"/>
+      <path d="M390 390L315 315"/>
+      <path d="M130 390L205 315"/>
+      <path d="M390 130L315 205"/>
+
+      <path d="M175 100L210 180"/>
+      <path d="M345 100L310 180"/>
+      <path d="M175 420L210 340"/>
+      <path d="M345 420L310 340"/>
+
+      <path d="M100 175L180 210"/>
+      <path d="M100 345L180 310"/>
+      <path d="M420 175L340 210"/>
+      <path d="M420 345L340 310"/>
+
+      <path d="M120 120L170 170"/>
+      <path d="M400 120L350 170"/>
+      <path d="M120 400L170 350"/>
+      <path d="M400 400L350 350"/>
+    </g>
+
+    <g fill="#F7D5FF" stroke="url(#ringGrad)" stroke-width="4">
+      <circle cx="260" cy="84" r="12"/>
+      <circle cx="260" cy="436" r="12"/>
+      <circle cx="84" cy="260" r="12"/>
+      <circle cx="436" cy="260" r="12"/>
+
+      <circle cx="130" cy="130" r="12"/>
+      <circle cx="390" cy="390" r="12"/>
+      <circle cx="130" cy="390" r="12"/>
+      <circle cx="390" cy="130" r="12"/>
+
+      <circle cx="175" cy="100" r="11"/>
+      <circle cx="345" cy="100" r="11"/>
+      <circle cx="175" cy="420" r="11"/>
+      <circle cx="345" cy="420" r="11"/>
+
+      <circle cx="100" cy="175" r="11"/>
+      <circle cx="100" cy="345" r="11"/>
+      <circle cx="420" cy="175" r="11"/>
+      <circle cx="420" cy="345" r="11"/>
+
+      <circle cx="120" cy="120" r="10"/>
+      <circle cx="400" cy="120" r="10"/>
+      <circle cx="120" cy="400" r="10"/>
+      <circle cx="400" cy="400" r="10"/>
+
+      <circle cx="260" cy="260" r="16" fill="#FF87F0" stroke="url(#ringGrad)"/>
+    </g>
+  </g>
+</svg>

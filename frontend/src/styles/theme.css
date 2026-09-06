@@ -1,0 +1,99 @@
+:root {
+  /* Base */
+  --bg: #f4f7fb;
+  --surface: #ffffff;
+  --surface-alt: #f7f9fc;
+  --border: #dce4ef;
+
+  /* Text */
+  --text: #17243b;
+  --text-muted: #60708a;
+  --text-faint: #8c9ab0;
+
+  /* Professional blue brand */
+  --primary: #315fbd;
+  --primary-soft: rgba(49, 95, 189, 0.09);
+  --primary-strong: #244c9b;
+
+  /* Semantic */
+  --risk: #b91c1c;
+  --risk-soft: rgba(185, 28, 28, 0.08);
+  --success: #0f766e;
+  --success-soft: rgba(15, 118, 110, 0.08);
+  --warning: #d97706;
+  --warning-soft: rgba(217, 119, 6, 0.08);
+
+  /* Entity group colors */
+  --node-person: #6654b7;
+  --node-location: #397ac2;
+  --node-organization: #c66d69;
+  --node-vehicle: #c98b32;
+  --node-phone: #278f96;
+
+  --font-ui: 'Aptos', 'Segoe UI', sans-serif;
+  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+
+  --shadow: 0 1px 2px rgba(23, 36, 59, 0.04), 0 8px 24px rgba(23, 36, 59, 0.055);
+}
+
+:root[data-theme='dark'] {
+  --bg: #111d31;
+  --surface: #18263b;
+  --surface-alt: #1d2d45;
+  --border: #30445f;
+  --text: #e5edf9;
+  --text-muted: #a8b7cd;
+  --text-faint: #8192ad;
+  --primary: #8caef2;
+  --primary-soft: rgba(140, 174, 242, 0.14);
+  --primary-strong: #b9d0ff;
+  --risk: #f09a9a;
+  --risk-soft: rgba(240, 154, 154, 0.14);
+  --success: #71c9bf;
+  --success-soft: rgba(113, 201, 191, 0.14);
+  --warning: #e8ba68;
+  --warning-soft: rgba(232, 186, 104, 0.14);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.22), 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:root[data-theme='dark'] body {
+  color-scheme: dark;
+}
+
+::selection {
+  background: rgba(37, 99, 235, 0.14);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #eef2f7;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+:root[data-theme='dark'] ::-webkit-scrollbar-track {
+  background: #142238;
+}
+
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: #405675;
+}

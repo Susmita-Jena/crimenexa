@@ -1,0 +1,8 @@
+flask
+flask-cors
+neo4j
+spacy
+python-dotenv
+anthropic
+openai
+python-dateutil
