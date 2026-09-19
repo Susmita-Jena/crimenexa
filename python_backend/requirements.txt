@@ -6,3 +6,4 @@ python-dotenv
 anthropic
 openai
 python-dateutil
+gunicorn
