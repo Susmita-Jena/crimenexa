@@ -10,7 +10,11 @@ import CaseList from './components/CaseList';
 import InvestigatorPage from './components/InvestigatorPage';
 import AdminPage from './components/AdminPage';
 import ProfilePage from './components/ProfilePage';
+import AccountSettings from './components/AccountSettings';
+import ActivityPage from './components/ActivityPage';
+import EvidenceIntegrity from './components/EvidenceIntegrity';
 import './App.css';
+import './styles/notifications.css';
 
 const AUTH_KEY = 'crimegraph-user';
 const THEME_KEY = 'crimenexa-theme';
@@ -195,6 +199,36 @@ export default function App() {
             <ProtectedRoute allowedRoles={['investigator', 'admin']}>
               <Layout>
                 <CaseList />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute allowedRoles={['investigator', 'admin']}>
+              <Layout>
+                <AccountSettings />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/activity"
+          element={
+            <ProtectedRoute allowedRoles={['investigator', 'admin']}>
+              <Layout>
+                <ActivityPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/evidence-integrity"
+          element={
+            <ProtectedRoute allowedRoles={['investigator', 'admin']}>
+              <Layout>
+                <EvidenceIntegrity />
               </Layout>
             </ProtectedRoute>
           }

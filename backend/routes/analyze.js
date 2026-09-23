@@ -8,6 +8,7 @@ const {
   syncEntitiesToGraph,
   syncRelationshipsToGraph
 } = require('../services/graphService');
+const { hashContent, appendCustodyEvent } = require('../services/custodyLedger');
 
 const router = express.Router();
 
@@ -29,11 +30,13 @@ function upsertByName(list, item) {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { text, sourceType, caseId } = req.body || {};
+    const { text, sourceType, caseId, actorName } = req.body || {};
 
     if (!text || !text.trim()) {
       return res.status(400).json({ error: 'Report text is required.' });
     }
+
+    const contentHash = hashContent(text);
 
     const extracted = await extractEntities(text, sourceType);
 
@@ -119,7 +122,8 @@ router.post('/', async (req, res, next) => {
       womenSafetySignals,
       provenance: investigationContext.provenance || { sourceType: sourceType || 'unspecified' },
       caseId: caseId || null,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      integrityHash: contentHash
     };
 
     if (caseId) {
@@ -133,6 +137,12 @@ router.post('/', async (req, res, next) => {
     db.reports.push(reportRecord);
     db.evidence = [...(db.evidence || []), ...reportRecord.evidence];
     db.leads = [...(db.leads || []), ...reportRecord.leads];
+    appendCustodyEvent(db, {
+      reportId: reportRecord.id,
+      action: 'INGESTED',
+      actorName: actorName || 'Investigator Portal',
+      detail: { sourceType: reportRecord.sourceType, contentHash }
+    });
     writeDB(db);
 
     res.json({ report: reportRecord, extracted, investigationContext, womenSafetySignals });

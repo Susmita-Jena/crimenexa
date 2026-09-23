@@ -45,7 +45,6 @@ function getSourceTypes(record) {
     valuesFromObject(record, [
       'sourceType',
       'source',
-      'sourceName',
       'reportType',
       'documentType',
       'evidenceType',

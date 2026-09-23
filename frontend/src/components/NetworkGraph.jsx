@@ -1,590 +1,693 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
 import { fetchGraph } from '../api';
 import { useTheme } from '../App';
+import GraphSidebar from './graph/GraphSidebar';
+import {
+  betweenness,
+  buildFindings,
+  buildIndex,
+  detectCells,
+  edgeAt,
+  findBrokers,
+  findCutPoints,
+  findPath,
+  formatDay,
+  nameOf,
+  nodesNotYetSeen,
+  pairKey,
+  removalImpact,
+  timeBounds,
+  withinHops
+} from '../utils/graphAnalytics';
+import { FAMILIES, TYPE_STYLES, cellColor, familyOf, paintCells, styleEdge, styleNode } from '../utils/graphVisuals';
+import '../styles/graph.css';
 
-const GROUP_STYLES = {
-  person: { color: '#6654b7', icon: '👤', label: 'Person' },
-  location: { color: '#397ac2', icon: '📍', label: 'Location' },
-  organization: { color: '#c66d69', icon: '🏢', label: 'Organization' },
-  vehicle: { color: '#c98b32', icon: '🚗', label: 'Vehicle' },
-  phone: { color: '#278f96', icon: '☎', label: 'Phone Number' },
-  event: { color: '#7a62b8', icon: '◷', label: 'Event' },
-  evidence: { color: '#7b8798', icon: '▣', label: 'Evidence' }
-};
+const DAY = 24 * 60 * 60 * 1000;
+const REDUCED_MOTION = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+const animation = (duration = 500) => (REDUCED_MOTION ? false : { duration, easingFunction: 'easeInOutQuad' });
 
-const RELATIONSHIP_STYLES = {
-  communicated_with: { color: '#278f96', icon: '☎', label: 'Communication' },
-  communication: { color: '#278f96', icon: '☎', label: 'Communication' },
-  located_at: { color: '#397ac2', icon: '📍', label: 'Location' },
-  seen_at: { color: '#397ac2', icon: '📍', label: 'Location / Observation' },
-  owns: { color: '#c98b32', icon: '🚗', label: 'Vehicle' },
-  owned_by: { color: '#c98b32', icon: '🚗', label: 'Vehicle' },
-  associated_with: { color: '#6654b7', icon: '↔', label: 'Association' },
-  connected_to: { color: '#6654b7', icon: '↔', label: 'Connection' },
-  works_for: { color: '#c66d69', icon: '🏢', label: 'Organization' },
-  involved_in: { color: '#7a62b8', icon: '◷', label: 'Event' },
-  event_of: { color: '#7a62b8', icon: '◷', label: 'Event' },
-  linked_to: { color: '#7b8798', icon: '▣', label: 'Evidence Link' }
-};
-
-const normalize = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
-
-function relationshipStyle(type) {
-  const key = normalize(type);
-  return RELATIONSHIP_STYLES[key] || { color: '#7d8ca3', icon: '•', label: type || 'Relationship' };
+function themeTokens(isDark) {
+  return isDark
+    ? { surface: '#18263b', text: '#e5edf9', textFaint: '#6f819d', accent: '#8caef2', gold: '#f0c96a', hot: '#ffd166', shadow: 'rgba(0, 0, 0, 0.45)' }
+    : { surface: '#ffffff', text: '#17243b', textFaint: '#a3aec1', accent: '#315fbd', gold: '#d19a1f', hot: '#d9480f', shadow: 'rgba(23, 36, 59, 0.2)' };
 }
 
-function getOccurrenceCount(edge) {
-  const candidates = [
-    edge.occurrenceCount,
-    edge.frequency,
-    edge.count,
-    edge.interactions,
-    edge.evidenceCount,
-    Array.isArray(edge.evidenceRefs) ? edge.evidenceRefs.length : 0,
-    Array.isArray(edge.evidence) ? edge.evidence.length : 0,
-    Array.isArray(edge.timestamps) ? edge.timestamps.length : 0,
-    1
-  ];
-  const n = Number(candidates.find((v) => Number(v) > 0));
-  return Number.isFinite(n) && n > 0 ? n : 1;
-}
-
-function edgeWidth(edge) {
-  const count = getOccurrenceCount(edge);
-  if (count >= 4) return 4;
-  if (count >= 2) return 2.6;
-  return 1.4;
-}
-
-function sourceList(entity) {
-  const values = [
-    ...(Array.isArray(entity?.sourceTypes) ? entity.sourceTypes : []),
-    ...(Array.isArray(entity?.sources) ? entity.sources : []),
-    ...(Array.isArray(entity?.provenance?.sources) ? entity.provenance.sources : [])
-  ].filter(Boolean);
-  return [...new Set(values.map(String))];
-}
-
-function evidenceList(entity) {
-  const values = [
-    ...(Array.isArray(entity?.evidenceRefs) ? entity.evidenceRefs : []),
-    ...(Array.isArray(entity?.evidenceIds) ? entity.evidenceIds : []),
-    ...(Array.isArray(entity?.provenance?.evidenceRefs) ? entity.provenance.evidenceRefs : [])
-  ].filter(Boolean);
-  return [...new Set(values.map(String))];
-}
-
-function stationList(entity) {
-  const values = [
-    entity?.policeStation,
-    entity?.station,
-    entity?.stationName,
-    entity?.jurisdiction,
-    entity?.provenance?.policeStation,
-    entity?.provenance?.station,
-    ...(Array.isArray(entity?.provenance?.policeStations) ? entity.provenance.policeStations : [])
-  ].filter(Boolean);
-  return [...new Set(values.map(String))];
-}
-
-function caseList(entity) {
-  const values = [
-    entity?.caseId,
-    entity?.caseID,
-    entity?.provenance?.caseId,
-    ...(Array.isArray(entity?.caseIds) ? entity.caseIds : [])
-  ].filter(Boolean);
-  return [...new Set(values.map(String))];
-}
-
-function formatEdgeDetails(edge) {
-  const style = relationshipStyle(edge.label || edge.type);
-  const sources = [
-    ...(Array.isArray(edge.sourceTypes) ? edge.sourceTypes : []),
-    ...(Array.isArray(edge.sources) ? edge.sources : [])
-  ].filter(Boolean);
-  const evidence = [
-    ...(Array.isArray(edge.evidenceRefs) ? edge.evidenceRefs : []),
-    ...(Array.isArray(edge.evidenceIds) ? edge.evidenceIds : [])
-  ].filter(Boolean);
-  const timestamps = Array.isArray(edge.timestamps) ? edge.timestamps.filter(Boolean) : [];
-  return [
-    `${style.icon} ${edge.label || edge.type || 'Relationship'}`,
-    `Occurrences: ${getOccurrenceCount(edge)}`,
-    sources.length ? `Sources: ${[...new Set(sources)].join(', ')}` : '',
-    evidence.length ? `Evidence: ${[...new Set(evidence)].join(', ')}` : '',
-    timestamps.length ? `Observed: ${timestamps[0]}${timestamps.length > 1 ? ` → ${timestamps[timestamps.length - 1]}` : ''}` : ''
-  ].filter(Boolean).join('\n');
-}
-
-function buildAlerts(nodes, edges, keyEntities) {
-  const alerts = [];
-  const nodeById = new Map(nodes.map((n) => [n.id, n]));
-
+/** Give edges that share the same two entities different curves so they do not overlap. */
+function withParallelSmoothing(edges) {
+  const groups = new Map();
   edges.forEach((edge) => {
-    const count = getOccurrenceCount(edge);
-    const from = nodeById.get(edge.from);
-    const to = nodeById.get(edge.to);
-    const evidenceCount = Array.isArray(edge.evidenceRefs) ? edge.evidenceRefs.length : Number(edge.evidenceCount || 0);
-    const sourceCount = Array.isArray(edge.sourceTypes) ? edge.sourceTypes.length : Number(edge.sourceCount || 0);
-    const label = edge.label || edge.type || 'relationship';
-
-    if (count >= 2) {
-      alerts.push({
-        id: `repeat-${edge.id || `${edge.from}-${edge.to}-${label}`}`,
-        severity: count >= 4 ? 'high' : 'medium',
-        icon: '↻',
-        title: 'Repeated Connection Detected',
-        text: `${from?.label || edge.from} ↔ ${to?.label || edge.to} has ${count} recorded occurrence${count === 1 ? '' : 's'}.`,
-        nodeId: edge.from,
-        edgeId: edge.id
-      });
-    }
-
-    if (sourceCount >= 2 || evidenceCount >= 2) {
-      alerts.push({
-        id: `cross-${edge.id || `${edge.from}-${edge.to}-${label}`}`,
-        severity: 'medium',
-        icon: '◈',
-        title: 'Cross-Source Recurrence',
-        text: `${label} is supported by multiple recorded sources/evidence references.`,
-        nodeId: edge.from,
-        edgeId: edge.id
-      });
-    }
-
-    const hasMovement = ['located_at', 'seen_at', 'location', 'movement'].includes(normalize(label));
-    if (hasMovement && (edge.timestamp || edge.eventDate || edge.timestamps?.length)) {
-      alerts.push({
-        id: `move-${edge.id || `${edge.from}-${edge.to}`}`,
-        severity: 'medium',
-        icon: '📍',
-        title: 'New Activity / Movement Signal',
-        text: `${from?.label || edge.from} has a recorded location activity linked to ${to?.label || edge.to}.`,
-        nodeId: edge.from,
-        edgeId: edge.id
-      });
-    }
+    const key = pairKey(edge.from, edge.to);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(edge);
   });
-
-  keyEntities.slice(0, 3).forEach((entity) => {
-    alerts.push({
-      id: `key-${entity.entityId}`,
-      severity: 'info',
-      icon: '◎',
-      title: 'Key Entity Identified',
-      text: `${entity.name} is ranked #${entity.rank} by structural importance.`,
-      nodeId: entity.entityId
-    });
+  return edges.map((edge) => {
+    const list = groups.get(pairKey(edge.from, edge.to));
+    if (list.length < 2) return edge;
+    const i = list.indexOf(edge);
+    return { ...edge, smooth: { enabled: true, type: i % 2 ? 'curvedCCW' : 'curvedCW', roundness: 0.18 + 0.12 * Math.floor(i / 2) } };
   });
-
-  const seen = new Set();
-  return alerts.filter((a) => {
-    const key = `${a.title}|${a.text}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, 8);
 }
 
 export default function NetworkGraph() {
-  const containerRef = useRef(null);
-  const networkRef = useRef(null);
-  const [isEmpty, setIsEmpty] = useState(false);
-  const [error, setError] = useState('');
-  const [keyEntities, setKeyEntities] = useState([]);
-  const [selectedEntityId, setSelectedEntityId] = useState(null);
-  const [graphData, setGraphData] = useState({ nodes: [], edges: [], keyEntities: [] });
-  const [query, setQuery] = useState('');
-  const [entityFilter, setEntityFilter] = useState('all');
-  const [relationshipFilter, setRelationshipFilter] = useState('all');
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [selectedEdge, setSelectedEdge] = useState(null);
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  const tokens = useMemo(() => themeTokens(isDark), [isDark]);
 
-  const alerts = useMemo(
-    () => buildAlerts(graphData.nodes, graphData.edges, keyEntities),
-    [graphData.nodes, graphData.edges, keyEntities]
-  );
+  const containerRef = useRef(null);
+  const netRef = useRef(null);
+  const nodesRef = useRef(null);
+  const edgesRef = useRef(null);
+  const paintRef = useRef(null);
+  const visibleRef = useRef([]);
 
-  const filteredGraph = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    const visibleNodes = graphData.nodes.filter((node) => {
-      const matchesType = entityFilter === 'all' || node.group === entityFilter;
-      const matchesQuery = !normalizedQuery || `${node.label} ${node.title || ''}`.toLowerCase().includes(normalizedQuery);
-      return matchesType && matchesQuery;
-    });
-    const visibleIds = new Set(visibleNodes.map((node) => node.id));
-    const visibleEdges = graphData.edges.filter((edge) => (
-      visibleIds.has(edge.from) && visibleIds.has(edge.to)
-      && (relationshipFilter === 'all' || edge.label === relationshipFilter)
-    ));
-    return { nodes: visibleNodes, edges: visibleEdges };
-  }, [entityFilter, graphData, query, relationshipFilter]);
+  const [graph, setGraph] = useState(null);
+  const [error, setError] = useState('');
+
+  const [selectedId, setSelectedId] = useState(null);
+  const [tab, setTab] = useState('insights');
+  const [query, setQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [hiddenFamilies, setHiddenFamilies] = useState(() => new Set());
+  const [showCells, setShowCells] = useState(true);
+  const [hops, setHops] = useState('all');
+  const [hoverEdgeId, setHoverEdgeId] = useState(null);
+
+  const [focus, setFocus] = useState(null); // { ids:Set, label }
+  const [activeCellId, setActiveCellId] = useState(null);
+
+  const [pathFrom, setPathFrom] = useState('');
+  const [pathTo, setPathTo] = useState('');
+  const [pathResult, setPathResult] = useState(undefined); // undefined = not run, null = no route
+
+  const [removedId, setRemovedId] = useState(null);
+
+  const [timeValue, setTimeValue] = useState(null);
+  const [playing, setPlaying] = useState(false);
+
+  /* ------------------------------- load data ------------------------------- */
 
   useEffect(() => {
-    setError('');
+    let alive = true;
     fetchGraph()
-      .then(({ nodes = [], edges = [], keyEntities: rankedEntities = [] }) => {
-        setGraphData({ nodes, edges, keyEntities: rankedEntities });
-        setKeyEntities(rankedEntities);
-        setIsEmpty(!nodes.length);
+      .then((data) => {
+        if (!alive) return;
+        const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+        const edges = withParallelSmoothing(Array.isArray(data.edges) ? data.edges : []);
+        setGraph({ nodes, edges, keyEntities: Array.isArray(data.keyEntities) ? data.keyEntities : [] });
+        const range = timeBounds(edges);
+        setTimeValue(range ? range.max : null);
       })
-      .catch(() => setError('Could not reach the backend. Is it running?'));
+      .catch(() => alive && setError('Could not reach the backend. Is it running on port 5000?'));
+    return () => {
+      alive = false;
+    };
   }, []);
 
-  useEffect(() => {
-    if (!filteredGraph.nodes.length || !containerRef.current) return undefined;
+  const nodes = useMemo(() => graph?.nodes || [], [graph]);
+  const edges = useMemo(() => graph?.edges || [], [graph]);
+  const nodeById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+  const fullIndex = useMemo(() => buildIndex(nodes, edges), [nodes, edges]);
+  const bounds = useMemo(() => timeBounds(edges), [edges]);
 
-    const selectedNeighbors = selectedEntityId
-      ? new Set([
-          selectedEntityId,
-          ...graphData.edges
-            .filter((edge) => edge.from === selectedEntityId || edge.to === selectedEntityId)
-            .flatMap((edge) => [edge.from, edge.to])
-        ])
-      : null;
+  /* ------------------------------- analytics ------------------------------- */
 
-    const styledNodes = filteredGraph.nodes.map((node) => {
-      const isSelected = node.id === selectedEntityId;
-      const isDimmed = selectedNeighbors && !selectedNeighbors.has(node.id);
-      const ranking = Number(node.keyEntityScore || 0);
-      const group = node.group || 'person';
-      const style = GROUP_STYLES[group] || { color: '#8b97aa', icon: '●', label: group };
+  const analysis = useMemo(() => {
+    if (!nodes.length) return null;
+    const { cells, cellOf } = detectCells(fullIndex);
+    const between = betweenness(fullIndex);
+    const brokers = findBrokers(fullIndex, cellOf, between);
+    const linkable = [...fullIndex.adj.keys()].filter((id) => fullIndex.adj.get(id).size >= 2);
+    const cutPoints = findCutPoints(nodes, edges, linkable);
+    const coloured = cells.map((cell, i) => ({ ...cell, color: cellColor(i) }));
+    return {
+      cells: coloured,
+      cellOf,
+      between,
+      brokers,
+      brokerIds: new Set(brokers.map((b) => b.id)),
+      cutPoints,
+      findings: buildFindings({ nodes, edges, cells, cellOf, brokers, cutPoints })
+    };
+  }, [nodes, edges, fullIndex]);
 
-      return {
-        ...node,
-        label: `${style.icon}  ${node.label}\n${style.label}`,
-        color: {
-          background: style.color,
-          border: node.rank === 1
-            ? (isDark ? '#f0c96a' : '#c88d22')
-            : isSelected
-              ? (isDark ? '#b9d0ff' : '#244c9b')
-              : (isDark ? '#314766' : '#ffffff'),
-          highlight: {
-            background: style.color,
-            border: isDark ? '#e6efff' : '#244c9b'
-          }
-        },
-        font: {
-          color: isDimmed ? (isDark ? '#687891' : '#aeb8c7') : (isDark ? '#e5edf9' : '#1c2a40'),
-          face: 'Aptos',
-          size: 12,
-          multi: true
-        },
-        shape: 'dot',
-        size: Math.min(34, 15 + Math.round(ranking * 8) + (isSelected ? 3 : 0)),
-        borderWidth: node.rank === 1 || isSelected ? 4 : 2,
-        opacity: isDimmed ? 0.28 : 1,
-        title: [
-          `${style.icon} ${node.label}`,
-          `Type: ${style.label}`,
-          node.rank ? `Key Entity Rank: #${node.rank} · Score ${node.keyEntityScore}` : '',
-          node.reasons?.length ? `Why: ${node.reasons.join(' · ')}` : ''
-        ].filter(Boolean).join('\n')
-      };
+  const impact = useMemo(() => (removedId ? removalImpact(nodes, edges, removedId) : null), [nodes, edges, removedId]);
+
+  /* -------------------------------- actions -------------------------------- */
+
+  /** Frame a set of entities with room for cell regions and labels. */
+  const frame = useCallback((ids, { animate = true, maxScale = 1.2 } = {}) => {
+    const net = netRef.current;
+    const box = containerRef.current;
+    if (!net || !box) return;
+    const points = Object.values(net.getPositions(ids));
+    if (!points.length) return;
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    const pad = 85;
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const scale = Math.min(maxScale, box.clientWidth / (maxX - minX + pad * 2), box.clientHeight / (maxY - minY + pad * 2));
+    net.moveTo({
+      position: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 },
+      scale,
+      animation: animate ? animation(500) : false
     });
+  }, []);
 
-    const styledEdges = filteredGraph.edges.map((edge) => {
-      const style = relationshipStyle(edge.label || edge.type);
-      const unrelated = selectedNeighbors && (!selectedNeighbors.has(edge.from) || !selectedNeighbors.has(edge.to));
-      return {
-        ...edge,
-        label: `${style.icon} ${edge.label || edge.type || 'RELATED'}`,
-        width: edgeWidth(edge),
-        color: {
-          color: unrelated ? (isDark ? '#26364e' : '#dfe5ee') : style.color,
-          highlight: isDark ? '#c7d9ff' : '#315fbd',
-          hover: style.color
-        },
-        font: {
-          color: unrelated ? (isDark ? '#53647c' : '#aab4c3') : (isDark ? '#c3d0e5' : '#60708a'),
-          size: 9,
-          strokeWidth: 3,
-          strokeColor: isDark ? '#111d31' : '#ffffff',
-          align: 'middle'
-        },
-        smooth: { type: 'dynamic' },
-        arrows: edge.arrows || { to: { enabled: true, scaleFactor: 0.45 } },
-        title: formatEdgeDetails(edge)
-      };
-    });
+  const frameAll = useCallback((options) => frame(visibleRef.current, options), [frame]);
 
-    const network = new Network(containerRef.current, {
-      nodes: new DataSet(styledNodes),
-      edges: new DataSet(styledEdges)
-    }, {
-      physics: {
-        stabilization: { iterations: 180 },
-        barnesHut: { gravitationalConstant: -4200, springLength: 145, avoidOverlap: 0.8 }
-      },
-      interaction: { hover: true, tooltipDelay: 120, navigationButtons: false },
-      edges: { width: 1.2, selectionWidth: 2 },
-      nodes: { shadow: { enabled: true, color: isDark ? 'rgba(0, 0, 0, .38)' : 'rgba(26, 52, 85, .16)', size: 7, x: 0, y: 3 } }
-    });
+  const fitTo = useCallback((ids) => {
+    const net = netRef.current;
+    if (!net) return;
+    const list = [...ids];
+    if (list.length === 1) net.focus(list[0], { scale: 1.0, animation: animation(450) });
+    else if (list.length > 1) frame(list);
+  }, [frame]);
 
-    networkRef.current = network;
-
-    network.on('click', ({ nodes: selectedNodes, edges: selectedEdges }) => {
-      setSelectedEntityId(selectedNodes[0] || null);
-      setSelectedEdge(selectedEdges[0] ? graphData.edges.find((e) => e.id === selectedEdges[0]) || null : null);
-    });
-
-    network.on('hoverEdge', ({ edge }) => {
-      const original = graphData.edges.find((e) => e.id === edge);
-      if (original) setSelectedEdge(original);
-    });
-
-    network.once('stabilizationIterationsDone', () => {
-      network.fit({ animation: { duration: 350, easingFunction: 'easeInOutQuad' } });
-    });
-
-    if (selectedEntityId && filteredGraph.nodes.some((node) => node.id === selectedEntityId)) {
-      network.selectNodes([selectedEntityId]);
+  const selectNode = useCallback((id, options = {}) => {
+    setSelectedId(id);
+    if (id) setTab('entity');
+    if (!id) setHops('all');
+    if (options.focus && id) {
+      setFocus(null);
+      setActiveCellId(null);
+      window.setTimeout(() => fitTo([id]), 0);
     }
+  }, [fitTo]);
 
-    return () => network.destroy();
-  }, [filteredGraph, graphData.edges, selectedEntityId, isDark]);
+  const showIds = useCallback((ids, label) => {
+    setSelectedId(null);
+    setHops('all');
+    setActiveCellId(null);
+    setFocus({ ids: new Set(ids), label });
+    window.setTimeout(() => fitTo(ids), 0);
+  }, [fitTo]);
 
-  const focusEntity = (entityId) => {
-    if (!networkRef.current) return;
-    const connectedNodeIds = networkRef.current.getConnectedNodes(entityId);
-    networkRef.current.selectNodes([entityId, ...connectedNodeIds]);
-    networkRef.current.focus(entityId, { scale: 1.25, animation: { duration: 450, easingFunction: 'easeInOutQuad' } });
-    setSelectedEntityId(entityId);
-    setShowNotifications(false);
+  const chooseCell = useCallback((cell) => {
+    if (activeCellId === cell.id) {
+      setActiveCellId(null);
+      setFocus(null);
+      return;
+    }
+    setActiveCellId(cell.id);
+    setSelectedId(null);
+    setFocus({ ids: new Set(cell.members), label: cell.name });
+    window.setTimeout(() => fitTo(cell.members), 0);
+  }, [activeCellId, fitTo]);
+
+  const runPath = useCallback(() => {
+    if (!pathFrom || !pathTo) return;
+    const result = findPath(fullIndex, pathFrom, pathTo);
+    setPathResult(result);
+    setFocus(null);
+    setActiveCellId(null);
+    if (result) window.setTimeout(() => fitTo(result.nodeIds), 0);
+  }, [fullIndex, pathFrom, pathTo, fitTo]);
+
+  const clearPath = useCallback(() => setPathResult(undefined), []);
+
+  const startWhatIf = useCallback((id) => {
+    setRemovedId(id);
+    setSelectedId(null);
+    setFocus(null);
+    setActiveCellId(null);
+    setHops('all');
+    setPathResult(undefined);
+  }, []);
+
+  const stopWhatIf = useCallback(() => {
+    setRemovedId(null);
+    setFocus(null);
+  }, []);
+
+  const showGroup = useCallback((ids, index) => showIds(ids, `Group ${index + 1} after removal`), [showIds]);
+
+  const toggleFamily = (family) => {
+    setHiddenFamilies((prev) => {
+      const next = new Set(prev);
+      if (next.has(family)) next.delete(family);
+      else next.add(family);
+      return next;
+    });
   };
 
-  const selectedEntity =
-    keyEntities.find((entity) => entity.entityId === selectedEntityId) ||
-    keyEntities[0];
+  const resetView = () => {
+    setQuery('');
+    setTypeFilter('all');
+    setHiddenFamilies(new Set());
+    setHops('all');
+    setFocus(null);
+    setActiveCellId(null);
+    setSelectedId(null);
+    setPathResult(undefined);
+    setRemovedId(null);
+    setPlaying(false);
+    if (bounds) setTimeValue(bounds.max);
+    window.setTimeout(() => frameAll(), 0);
+  };
 
-  const selectedSources = sourceList(selectedEntity);
-  const selectedEvidence = evidenceList(selectedEntity);
-  const selectedStations = stationList(selectedEntity);
-  const selectedCases = caseList(selectedEntity);
+  /* ------------------------------- timeline ------------------------------- */
 
-  const selectedNodeEdges = selectedEntityId
-    ? graphData.edges.filter((edge) => edge.from === selectedEntityId || edge.to === selectedEntityId)
-    : [];
+  useEffect(() => {
+    if (!playing || !bounds) return undefined;
+    const step = Math.max((bounds.max - bounds.min) / 90, DAY);
+    const timer = window.setInterval(() => {
+      setTimeValue((prev) => Math.min((prev ?? bounds.min) + step, bounds.max));
+    }, 110);
+    return () => window.clearInterval(timer);
+  }, [playing, bounds]);
 
-  const activityEdges = selectedEntityId
-    ? selectedNodeEdges
-        .filter((edge) => edge.timestamp || edge.eventDate || edge.timestamps?.length)
-        .sort((a, b) => String(a.timestamp || a.eventDate || a.timestamps?.[0] || '').localeCompare(String(b.timestamp || b.eventDate || b.timestamps?.[0] || '')))
-    : [];
+  useEffect(() => {
+    if (playing && bounds && timeValue !== null && timeValue >= bounds.max) setPlaying(false);
+  }, [playing, bounds, timeValue]);
 
-  const relationshipTypes = [...new Set(graphData.edges.map((edge) => edge.label).filter(Boolean))].sort();
+  const startReplay = () => {
+    if (!bounds) return;
+    setTimeValue(bounds.min);
+    setPlaying(true);
+  };
 
-  const counts = {
-    relationships: filteredGraph.edges.length,
-    people: filteredGraph.nodes.filter((node) => node.group === 'person').length,
-    locations: filteredGraph.nodes.filter((node) => node.group === 'location').length,
-    vehicles: filteredGraph.nodes.filter((node) => node.group === 'vehicle').length,
-    organizations: filteredGraph.nodes.filter((node) => node.group === 'organization').length
+  const timeActive = !!bounds && timeValue !== null && timeValue < bounds.max;
+
+  /* --------------------------- what is on screen --------------------------- */
+
+  const view = useMemo(() => {
+    if (!analysis) return null;
+
+    const q = query.trim().toLowerCase();
+    const unseen = timeActive ? nodesNotYetSeen(nodes, edges, timeValue) : new Set();
+    const nearby = selectedId && hops !== 'all' ? withinHops(fullIndex, selectedId, hops) : null;
+
+    const hiddenNodes = new Set();
+    nodes.forEach((node) => {
+      if (typeFilter !== 'all' && node.group !== typeFilter) hiddenNodes.add(node.id);
+      else if (unseen.has(node.id)) hiddenNodes.add(node.id);
+      else if (nearby && !nearby.has(node.id)) hiddenNodes.add(node.id);
+    });
+
+    const hiddenEdges = new Set();
+    const edgeCount = new Map();
+    edges.forEach((edge) => {
+      const family = familyOf(edge.label || edge.type);
+      const state = timeActive ? edgeAt(edge, timeValue) : null;
+      if (state) edgeCount.set(edge.id, state.count);
+      if (
+        hiddenNodes.has(edge.from) || hiddenNodes.has(edge.to)
+        || hiddenFamilies.has(family)
+        || (state && !state.visible)
+        || edge.from === removedId || edge.to === removedId
+      ) {
+        hiddenEdges.add(edge.id);
+      }
+    });
+
+    // What gets emphasised, in order of priority.
+    let emphasisNodes = null;
+    const hotEdges = new Set();
+    const labelEdges = new Set();
+    let emphasisEdge = () => false;
+
+    if (pathResult) {
+      emphasisNodes = new Set(pathResult.nodeIds);
+      pathResult.edgeIds.forEach((id) => { hotEdges.add(id); labelEdges.add(id); });
+      emphasisEdge = (edge) => hotEdges.has(edge.id);
+    } else if (focus) {
+      emphasisNodes = focus.ids;
+      emphasisEdge = (edge) => focus.ids.has(edge.from) && focus.ids.has(edge.to);
+    } else if (selectedId) {
+      emphasisNodes = new Set([selectedId]);
+      edges.forEach((edge) => {
+        if (edge.from === selectedId || edge.to === selectedId) {
+          emphasisNodes.add(edge.from);
+          emphasisNodes.add(edge.to);
+          labelEdges.add(edge.id);
+        }
+      });
+      emphasisEdge = (edge) => edge.from === selectedId || edge.to === selectedId;
+    } else if (q) {
+      const matches = new Set(nodes.filter((n) => nameOf(n).toLowerCase().includes(q)).map((n) => n.id));
+      emphasisNodes = new Set(matches);
+      edges.forEach((edge) => {
+        if (matches.has(edge.from) || matches.has(edge.to)) {
+          emphasisNodes.add(edge.from);
+          emphasisNodes.add(edge.to);
+        }
+      });
+      emphasisEdge = (edge) => matches.has(edge.from) || matches.has(edge.to);
+    }
+
+    if (hoverEdgeId) labelEdges.add(hoverEdgeId);
+
+    const dimNodes = new Set();
+    const dimEdges = new Set();
+    if (emphasisNodes) {
+      nodes.forEach((n) => { if (!emphasisNodes.has(n.id)) dimNodes.add(n.id); });
+      edges.forEach((e) => { if (!emphasisEdge(e)) dimEdges.add(e.id); });
+    }
+
+    return { hiddenNodes, hiddenEdges, dimNodes, dimEdges, hotEdges, labelEdges, edgeCount };
+  }, [analysis, nodes, edges, fullIndex, query, typeFilter, hiddenFamilies, hops, selectedId, focus, pathResult, removedId, hoverEdgeId, timeActive, timeValue]);
+
+  /* --------------------------- create the network --------------------------- */
+
+  useEffect(() => {
+    if (!analysis || !containerRef.current) return undefined;
+
+    const base = themeTokens(false);
+    const nodeSet = new DataSet(
+      nodes.map((node) => styleNode(node, { label: nameOf(node), keyRank: node.rank, broker: analysis.brokerIds.has(node.id) }, base))
+    );
+    const edgeSet = new DataSet(
+      edges.map((edge) => ({
+        ...styleEdge(edge, {}, base),
+        from: edge.from,
+        to: edge.to,
+        // keep cells visually apart so their regions do not overlap
+        length: analysis.cellOf.get(edge.from) && analysis.cellOf.get(edge.from) !== analysis.cellOf.get(edge.to) ? 240 : 115
+      }))
+    );
+
+    const network = new Network(containerRef.current, { nodes: nodeSet, edges: edgeSet }, {
+      autoResize: true,
+      physics: {
+        solver: 'forceAtlas2Based',
+        forceAtlas2Based: { gravitationalConstant: -85, centralGravity: 0.008, springConstant: 0.06, damping: 0.55, avoidOverlap: 1 },
+        stabilization: { iterations: 320, updateInterval: 40 }
+      },
+      interaction: { hover: true, hoverConnectedEdges: false, selectConnectedEdges: false, tooltipDelay: 100000, zoomSpeed: 0.6 },
+      nodes: { font: { size: 12 }, scaling: { label: { drawThreshold: 5 } } },
+      edges: { font: { size: 11 }, chosen: false }
+    });
+
+    // Keep labels readable at any zoom level: grow the font as the graph shrinks.
+    let fontSize = 12;
+    const applyFontScale = () => {
+      const size = Math.round(Math.min(22, Math.max(12, 12 / network.getScale())));
+      if (size === fontSize) return;
+      fontSize = size;
+      network.setOptions({ nodes: { font: { size } }, edges: { font: { size: Math.max(11, size - 1) } } });
+    };
+    network.on('zoom', applyFontScale);
+    network.on('animationFinished', applyFontScale);
+
+    network.on('click', (params) => {
+      if (params.nodes.length) selectNode(params.nodes[0]);
+      else if (!params.edges.length) selectNode(null);
+    });
+    network.on('doubleClick', (params) => {
+      if (params.nodes.length) network.focus(params.nodes[0], { scale: 1.3, animation: animation(400) });
+    });
+    network.on('hoverNode', () => { if (containerRef.current) containerRef.current.style.cursor = 'pointer'; });
+    network.on('blurNode', () => { if (containerRef.current) containerRef.current.style.cursor = 'default'; });
+    network.on('hoverEdge', (params) => setHoverEdgeId(params.edge));
+    network.on('blurEdge', () => setHoverEdgeId(null));
+    network.on('beforeDrawing', (ctx) => {
+      const paint = paintRef.current;
+      if (!paint || !paint.showCells) return;
+      paintCells(ctx, (ids) => network.getPositions(ids), paint.cells, paint);
+    });
+    network.once('stabilizationIterationsDone', () => {
+      network.setOptions({ physics: false });
+      frame(nodes.map((n) => n.id));
+    });
+
+    netRef.current = network;
+    nodesRef.current = nodeSet;
+    edgesRef.current = edgeSet;
+
+    return () => {
+      network.destroy();
+      netRef.current = null;
+      nodesRef.current = null;
+      edgesRef.current = null;
+    };
+  }, [analysis, nodes, edges, selectNode, frame]);
+
+  /* ------------------------- push state into the canvas ------------------------- */
+
+  useEffect(() => {
+    const net = netRef.current;
+    if (!net || !view || !analysis) return;
+
+    nodesRef.current.update(
+      nodes.map((node) => styleNode(node, {
+        hidden: view.hiddenNodes.has(node.id),
+        dim: view.dimNodes.has(node.id) || node.id === removedId,
+        selected: node.id === selectedId,
+        label: node.id === removedId ? `${nameOf(node)} (removed)` : nameOf(node),
+        keyRank: node.rank,
+        broker: analysis.brokerIds.has(node.id)
+      }, tokens))
+    );
+
+    edgesRef.current.update(
+      edges.map((edge) => styleEdge(edge, {
+        hidden: view.hiddenEdges.has(edge.id),
+        dim: view.dimEdges.has(edge.id),
+        hot: view.hotEdges.has(edge.id),
+        label: view.labelEdges.has(edge.id),
+        count: view.edgeCount.get(edge.id)
+      }, tokens))
+    );
+
+    visibleRef.current = nodes.filter((n) => !view.hiddenNodes.has(n.id) && n.id !== removedId).map((n) => n.id);
+    paintRef.current = {
+      showCells,
+      cells: analysis.cells,
+      isVisible: (id) => !view.hiddenNodes.has(id) && id !== removedId,
+      activeCellId,
+      dark: isDark
+    };
+    net.redraw();
+  }, [view, analysis, nodes, edges, tokens, isDark, selectedId, removedId, showCells, activeCellId]);
+
+  /* -------------------------------- toolbar -------------------------------- */
+
+  const zoomBy = (factor) => {
+    const net = netRef.current;
+    if (net) net.moveTo({ scale: net.getScale() * factor, animation: animation(250) });
+  };
+
+  const relayout = () => {
+    const net = netRef.current;
+    if (!net) return;
+    net.setOptions({ physics: { enabled: true } });
+    net.once('stabilized', () => {
+      net.setOptions({ physics: false });
+      frameAll();
+    });
+    net.stabilize(200);
+  };
+
+  const exportPng = () => {
+    const source = containerRef.current?.querySelector('canvas');
+    if (!source) return;
+    const out = document.createElement('canvas');
+    out.width = source.width;
+    out.height = source.height;
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = tokens.surface;
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(source, 0, 0);
+    const link = document.createElement('a');
+    link.download = `crimenexa-network-${new Date().toISOString().slice(0, 10)}.png`;
+    link.href = out.toDataURL('image/png');
+    link.click();
+  };
+
+  const onSearchKey = (event) => {
+    if (event.key !== 'Enter') return;
+    const q = query.trim().toLowerCase();
+    const match = nodes.find((n) => nameOf(n).toLowerCase().includes(q));
+    if (match) selectNode(match.id, { focus: true });
+  };
+
+  /* -------------------------------- rendering -------------------------------- */
+
+  if (error) {
+    return (
+      <div className="page">
+        <div className="page-header"><h1>Network Graph</h1></div>
+        <p className="page-error">{error}</p>
+      </div>
+    );
+  }
+
+  const shownNodes = view ? nodes.length - view.hiddenNodes.size : 0;
+  const shownEdges = view ? edges.length - view.hiddenEdges.size : 0;
+  const isEmpty = graph && !nodes.length;
+
+  const banners = [];
+  if (removedId && impact) {
+    banners.push({
+      key: 'removal',
+      tone: 'danger',
+      text: impact.splits
+        ? `Without ${nameOf(nodeById.get(removedId))}, the network splits into ${impact.groups.length} groups`
+        : `Without ${nameOf(nodeById.get(removedId))}, the network stays in one piece`,
+      action: 'Bring back',
+      run: stopWhatIf
+    });
+  }
+  if (pathResult) banners.push({ key: 'path', text: 'Showing the shortest connection', action: 'Clear', run: clearPath });
+  if (focus && !pathResult) banners.push({ key: 'focus', text: `Showing ${focus.label}`, action: 'Clear', run: () => { setFocus(null); setActiveCellId(null); } });
+  if (selectedId && hops !== 'all') banners.push({ key: 'hops', text: `Only entities within ${hops} ${hops === 1 ? 'step' : 'steps'} of ${nameOf(nodeById.get(selectedId))}`, action: 'Show all', run: () => setHops('all') });
+
+  const sidebarCtx = analysis && {
+    tab,
+    setTab,
+    nodes,
+    edges,
+    nodeById,
+    analysis,
+    keyEntities: graph.keyEntities,
+    selectedId,
+    selectNode,
+    showIds,
+    activeCellId,
+    chooseCell,
+    hops,
+    setHops,
+    path: { from: pathFrom, to: pathTo, setFrom: setPathFrom, setTo: setPathTo, result: pathResult, run: runPath, clear: clearPath },
+    whatIf: { start: startWhatIf }
   };
 
   return (
-    <div className="page">
-      <div className="page-header graph-page-header">
-        <span className="eyebrow">Investigation workspace / network intelligence</span>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-          <div>
-            <h1>Network Graph</h1>
-            <p className="page-subtitle">Explore connections, recurring activity and structurally important entities.</p>
-          </div>
-          <div style={{ position: 'relative' }}>
-            <button
-              type="button"
-              className="toolbar-button"
-              onClick={() => setShowNotifications((v) => !v)}
-              aria-label="Open investigative notifications"
-              aria-expanded={showNotifications}
-              style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 8 }}
-            >
-              <span aria-hidden="true">🔔</span>
-              Notifications
-              {alerts.length > 0 && (
-                <span style={{ minWidth: 20, height: 20, padding: '0 5px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, background: '#c84b4b', color: '#fff' }}>
-                  {alerts.length}
-                </span>
-              )}
-            </button>
+    <div className="page gx-page">
+      <div className="page-header">
+        <h1>Network Graph</h1>
+        <p className="page-subtitle">See how people, places, phones and companies connect, where the network is fragile, and what changed over time.</p>
+      </div>
 
-            {showNotifications && (
-              <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: 360, maxWidth: 'calc(100vw - 32px)', zIndex: 30, background: isDark ? '#18243a' : '#fff', color: isDark ? '#e7eef9' : '#1b2a40', border: `1px solid ${isDark ? '#30435f' : '#dce3ed'}`, borderRadius: 14, boxShadow: '0 14px 40px rgba(20,35,60,.18)', padding: 14 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <strong>Investigative Signals</strong>
-                  <span style={{ fontSize: 12, opacity: .7 }}>{alerts.length} detected</span>
-                </div>
-                {!alerts.length && <div style={{ padding: 18, fontSize: 13, opacity: .7 }}>No evidence-backed activity signals detected.</div>}
-                {alerts.map((alert) => (
-                  <button
-                    key={alert.id}
-                    type="button"
-                    onClick={() => {
-                      if (alert.nodeId) focusEntity(alert.nodeId);
-                      if (alert.edgeId) setSelectedEdge(graphData.edges.find((e) => e.id === alert.edgeId) || null);
-                    }}
-                    style={{ width: '100%', textAlign: 'left', border: 0, borderTop: `1px solid ${isDark ? '#2a3b54' : '#edf0f5'}`, background: 'transparent', color: 'inherit', padding: '11px 4px', cursor: 'pointer' }}
-                  >
-                    <div style={{ display: 'flex', gap: 9 }}>
-                      <span style={{ fontSize: 16 }}>{alert.icon}</span>
-                      <span>
-                        <strong style={{ display: 'block', fontSize: 13 }}>{alert.title}</strong>
-                        <span style={{ display: 'block', marginTop: 3, fontSize: 12, opacity: .75, lineHeight: 1.45 }}>{alert.text}</span>
-                        <small style={{ display: 'block', marginTop: 5, opacity: .6 }}>Requires investigator review</small>
-                      </span>
+      {!graph && <p className="empty-state">Loading network...</p>}
+      {isEmpty && <p className="empty-state">No graph data yet. Analyze a report first.</p>}
+
+      {analysis && (
+        <div className="gx-shell">
+          <section className="panel gx-stage" aria-label="Network graph">
+            <div className="gx-toolbar">
+              <label className="gx-search">
+                <span className="gx-visually-hidden">Search entities</span>
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={onSearchKey}
+                  placeholder="Find an entity"
+                />
+              </label>
+              <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} aria-label="Show only one kind of entity">
+                <option value="all">All entity types</option>
+                {Object.entries(TYPE_STYLES).filter(([key]) => nodes.some((n) => n.group === key)).map(([key, item]) => (
+                  <option key={key} value={key}>{item.label}</option>
+                ))}
+              </select>
+              <button type="button" className={`gx-toggle ${showCells ? 'is-on' : ''}`} aria-pressed={showCells} onClick={() => setShowCells((v) => !v)}>
+                Cell regions
+              </button>
+              <span className="gx-spacer" />
+              <button type="button" className="gx-icon-button" onClick={() => frameAll()} aria-label="Fit graph to screen" title="Fit to screen">Fit</button>
+              <button type="button" className="gx-icon-button" onClick={() => zoomBy(1.25)} aria-label="Zoom in" title="Zoom in">+</button>
+              <button type="button" className="gx-icon-button" onClick={() => zoomBy(0.8)} aria-label="Zoom out" title="Zoom out">-</button>
+              <button type="button" className="gx-icon-button" onClick={relayout} title="Re-arrange the layout">Re-layout</button>
+              <button type="button" className="gx-icon-button" onClick={exportPng} title="Download the current view as an image">Save image</button>
+              <button type="button" className="gx-icon-button" onClick={resetView}>Reset</button>
+            </div>
+
+            <div className="gx-stats" aria-live="polite">
+              <span><strong>{shownNodes}</strong> entities</span>
+              <span><strong>{shownEdges}</strong> links</span>
+              <span><strong>{analysis.cells.length}</strong> cells</span>
+              <span><strong>{analysis.brokers.length}</strong> brokers</span>
+            </div>
+
+            <div className="gx-canvas-wrap">
+              <div ref={containerRef} className="gx-canvas" role="img" aria-label="Interactive network graph of entities and their relationships" />
+
+              {banners.length > 0 && (
+                <div className="gx-banners">
+                  {banners.map((b) => (
+                    <div key={b.key} className={`gx-banner ${b.tone === 'danger' ? 'is-danger' : ''}`}>
+                      <span>{b.text}</span>
+                      <button type="button" onClick={b.run}>{b.action}</button>
                     </div>
+                  ))}
+                  {impact && removedId && (impact.groups.length > 0 || impact.isolated.length > 0) && (
+                    <div className="gx-banner gx-fragments">
+                      {impact.groups.map((group, i) => (
+                        <button type="button" key={i} onClick={() => showGroup(group, i)}>
+                          Group {i + 1}: {group.length} entities
+                        </button>
+                      ))}
+                      {impact.isolated.length > 0 && <span>{impact.isolated.length} left with no connections</span>}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {hoverEdgeId && (() => {
+                const edge = edges.find((e) => e.id === hoverEdgeId);
+                if (!edge) return null;
+                const times = edge.timestamps || [];
+                return (
+                  <div className="gx-edge-card">
+                    <strong>{nameOf(nodeById.get(edge.from))} to {nameOf(nodeById.get(edge.to))}</strong>
+                    <span>{String(edge.label || edge.type).replace(/_/g, ' ')}, {edge.occurrenceCount || 1} {(edge.occurrenceCount || 1) === 1 ? 'record' : 'records'}</span>
+                    {edge.description && <span>{edge.description}</span>}
+                    {times.length > 0 && <span>{formatDay(Date.parse(times[0]))}{times.length > 1 ? ` to ${formatDay(Date.parse(times[times.length - 1]))}` : ''}</span>}
+                    {edge.sourceTypes?.length > 0 && <span>Sources: {edge.sourceTypes.join(', ')}</span>}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {bounds && (
+              <div className="gx-timeline">
+                <button type="button" className="gx-button" onClick={playing ? () => setPlaying(false) : startReplay}>
+                  {playing ? 'Pause' : 'Replay growth'}
+                </button>
+                <input
+                  type="range"
+                  min={bounds.min}
+                  max={bounds.max}
+                  step={DAY}
+                  value={timeValue ?? bounds.max}
+                  onChange={(event) => { setPlaying(false); setTimeValue(Number(event.target.value)); }}
+                  aria-label="Show the network as it was on this date"
+                />
+                <time>{formatDay(timeValue ?? bounds.max)}</time>
+              </div>
+            )}
+
+            <div className="gx-legend">
+              <div className="gx-legend-group" aria-label="Entity types">
+                {Object.entries(TYPE_STYLES).filter(([key]) => nodes.some((n) => n.group === key)).map(([key, item]) => (
+                  <span key={key} className="gx-legend-item"><i className="gx-dot-swatch" style={{ background: item.color }} />{item.label}</span>
+                ))}
+              </div>
+              <div className="gx-legend-group" aria-label="Relationship types, click to hide or show">
+                {Object.entries(FAMILIES).filter(([key]) => edges.some((e) => familyOf(e.label || e.type) === key)).map(([key, item]) => (
+                  <button
+                    type="button"
+                    key={key}
+                    className={`gx-legend-chip ${hiddenFamilies.has(key) ? 'is-off' : ''}`}
+                    aria-pressed={!hiddenFamilies.has(key)}
+                    onClick={() => toggleFamily(key)}
+                  >
+                    <i className="gx-line-swatch" style={{ background: item.color }} />{item.label}
                   </button>
                 ))}
               </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="panel graph-panel">
-        <div className="graph-toolbar">
-          <label className="graph-search"><span aria-hidden="true">⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search entities, locations, phone numbers..." /></label>
-          <select value={entityFilter} onChange={(event) => setEntityFilter(event.target.value)} aria-label="Filter entity types">
-            <option value="all">All entity types</option>
-            {Object.entries(GROUP_STYLES).map(([group, item]) => <option value={group} key={group}>{item.label}</option>)}
-          </select>
-          <select value={relationshipFilter} onChange={(event) => setRelationshipFilter(event.target.value)} aria-label="Filter relationships">
-            <option value="all">All relationships</option>
-            {relationshipTypes.map((type) => <option value={type} key={type}>{type}</option>)}
-          </select>
-          <button className="toolbar-button" type="button" onClick={() => { setQuery(''); setEntityFilter('all'); setRelationshipFilter('all'); }}>Reset</button>
-          <button className="toolbar-icon" type="button" onClick={() => networkRef.current?.fit({ animation: true })} title="Fit graph">⊙</button>
-          <button className="toolbar-icon" type="button" onClick={() => networkRef.current?.moveTo({ scale: (networkRef.current?.getScale() || 1) * 1.18 })} title="Zoom in">＋</button>
-          <button className="toolbar-icon" type="button" onClick={() => networkRef.current?.moveTo({ scale: (networkRef.current?.getScale() || 1) / 1.18 })} title="Zoom out">−</button>
-        </div>
-
-        <div className="graph-summary-strip">
-          {Object.entries(counts).map(([key, value]) => <div key={key}><strong>{value}</strong><span>{key}</span></div>)}
-        </div>
-
-        <div className="graph-workspace">
-          <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-            <div ref={containerRef} className="graph-canvas" />
-            {selectedEdge && (
-              <div style={{ position: 'absolute', left: 14, bottom: 14, zIndex: 5, width: 300, maxWidth: 'calc(100% - 28px)', background: isDark ? 'rgba(24,36,58,.96)' : 'rgba(255,255,255,.96)', color: isDark ? '#e7eef9' : '#1b2a40', border: `1px solid ${isDark ? '#30435f' : '#dce3ed'}`, borderRadius: 12, padding: 13, boxShadow: '0 8px 28px rgba(20,35,60,.15)' }}>
-                <button type="button" onClick={() => setSelectedEdge(null)} aria-label="Close relationship details" style={{ float: 'right', border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 16 }}>×</button>
-                <strong>{relationshipStyle(selectedEdge.label || selectedEdge.type).icon} {selectedEdge.label || selectedEdge.type || 'Relationship'}</strong>
-                <div style={{ fontSize: 12, lineHeight: 1.6, marginTop: 7, opacity: .82 }}>
-                  <div>Occurrences: <b>{getOccurrenceCount(selectedEdge)}</b></div>
-                  {selectedEdge.sourceTypes?.length ? <div>Sources: {selectedEdge.sourceTypes.join(', ')}</div> : null}
-                  {selectedEdge.evidenceRefs?.length ? <div>Evidence: {selectedEdge.evidenceRefs.join(', ')}</div> : null}
-                  {selectedEdge.timestamp ? <div>Observed: {selectedEdge.timestamp}</div> : null}
-                  {selectedEdge.timestamps?.length ? <div>Observed: {selectedEdge.timestamps[0]} → {selectedEdge.timestamps[selectedEdge.timestamps.length - 1]}</div> : null}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <aside className="key-entities" aria-labelledby="key-entities-heading">
-            <div className="key-entities-header">
-              <div>
-                <h2 id="key-entities-heading">Key Entities</h2>
-                <p>Structural importance in the current evidence network.</p>
-              </div>
-              {selectedEntityId && <span className="key-entity-selection">Highlighted in graph</span>}
+              <p className="gx-key">Gold ring: top three by importance. Dashed ring: broker between cells. Thicker line: more recorded occurrences. Shaded region: cell.</p>
             </div>
+          </section>
 
-            <div className="key-entity-list">
-              {keyEntities.slice(0, 5).map((entity) => (
-                <button type="button" className={`key-entity-item ${selectedEntityId === entity.entityId ? 'selected' : ''}`} key={entity.entityId} onClick={() => focusEntity(entity.entityId)}>
-                  <span className="key-entity-rank">#{entity.rank}</span>
-                  <span className="key-entity-content">
-                    <strong>{GROUP_STYLES[normalize(entity.entityType)]?.icon || '👤'} {entity.name}</strong>
-                    <span>{entity.entityType} · Score {entity.keyEntityScore}</span>
-                    <span>{entity.metrics.connections} connections · {entity.metrics.relationshipTypes} relationship types · {entity.metrics.entityTypes} entity types · {entity.metrics.evidenceSources} evidence sources</span>
-                    <small>Why: {(entity.reasons || []).join('; ')}</small>
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            {selectedEntity && (
-              <div className="entity-detail-card">
-                <span className="eyebrow">Selected entity</span>
-                <h3>{GROUP_STYLES[normalize(selectedEntity.entityType)]?.icon || '👤'} {selectedEntity.name}</h3>
-                <span className="detail-type">{selectedEntity.entityType} · Rank #{selectedEntity.rank}</span>
-
-                <div className="detail-metrics">
-                  <span><strong>{selectedEntity.keyEntityScore}</strong> score</span>
-                  <span><strong>{selectedEntity.metrics.connections}</strong> connections</span>
-                  <span><strong>{selectedEntity.metrics.evidenceSources}</strong> sources</span>
-                  <span><strong>{selectedEntity.metrics.temporalOccurrences}</strong> temporal</span>
-                </div>
-
-                <p>Why important</p>
-                <ul>{(selectedEntity.reasons || []).map((reason) => <li key={reason}>{reason}</li>)}</ul>
-
-                <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${isDark ? '#2d405b' : '#e5e9ef'}` }}>
-                  <strong style={{ display: 'block', marginBottom: 8 }}>SOURCE / PROVENANCE</strong>
-                  <div style={{ fontSize: 12, lineHeight: 1.65 }}>
-                    <div><b>Police Station:</b> {selectedStations.length ? selectedStations.join(', ') : 'Not recorded'}</div>
-                    <div><b>Case:</b> {selectedCases.length ? selectedCases.join(', ') : 'Not recorded'}</div>
-                    <div><b>Sources:</b> {selectedSources.length ? selectedSources.join(', ') : 'Not recorded'}</div>
-                    <div><b>Evidence:</b> {selectedEvidence.length ? selectedEvidence.join(', ') : 'Not recorded'}</div>
-                  </div>
-                </div>
-
-                {activityEdges.length > 0 && (
-                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${isDark ? '#2d405b' : '#e5e9ef'}` }}>
-                    <strong style={{ display: 'block', marginBottom: 8 }}>ACTIVITY / MOVEMENT</strong>
-                    <div style={{ maxHeight: 150, overflowY: 'auto', fontSize: 12 }}>
-                      {activityEdges.map((edge) => {
-                        const fromNode = graphData.nodes.find((n) => n.id === edge.from);
-                        const toNode = graphData.nodes.find((n) => n.id === edge.to);
-                        const when = edge.timestamp || edge.eventDate || edge.timestamps?.[0];
-                        return (
-                          <div key={edge.id} style={{ padding: '6px 0', borderBottom: `1px solid ${isDark ? '#26384f' : '#edf0f4'}` }}>
-                            <b>{when || 'Recorded event'}</b>
-                            <div>{relationshipStyle(edge.label || edge.type).icon} {fromNode?.label || edge.from} → {toNode?.label || edge.to}</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                <div style={{ marginTop: 12, fontSize: 11, opacity: .65 }}>
-                  ⚠ Analytical output is decision-support and requires human verification.
-                </div>
-              </div>
-            )}
-          </aside>
+          <GraphSidebar ctx={sidebarCtx} />
         </div>
-
-        <div className="graph-legend legend">
-          {Object.entries(GROUP_STYLES).map(([group, item]) => (
-            <div className="legend-item" key={group}>
-              <span style={{ display: 'inline-flex', width: 22, justifyContent: 'center' }}>{item.icon}</span>
-              <span className="legend-dot" style={{ background: item.color }} />
-              {item.label}
-            </div>
-          ))}
-          <div className="legend-item" style={{ marginLeft: 'auto' }}>
-            <span>—</span> single
-            <span style={{ marginLeft: 8 }}>━━</span> repeated
-            <span style={{ marginLeft: 8 }}>━━━</span> high recurrence
-          </div>
-        </div>
-
-        {selectedEdge && <div style={{ padding: '8px 14px 12px', fontSize: 11, opacity: .7 }}>Relationship selected. Hover over edges for details; thicker lines indicate higher recorded recurrence.</div>}
-        {error && <p className="page-error">{error}</p>}
-        {isEmpty && !error && <p className="empty-state">No graph data yet — analyze a report first.</p>}
-      </div>
+      )}
     </div>
   );
 }
-
-

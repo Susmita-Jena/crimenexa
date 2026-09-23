@@ -7,6 +7,7 @@ const graphRoute = require('./routes/graph');
 const peopleRoute = require('./routes/people');
 const casesRoute = require('./routes/cases');
 const reportsRoute = require('./routes/reports');
+const custodyRoute = require('./routes/custody');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -23,6 +24,7 @@ app.use('/api/graph', graphRoute);
 app.use('/api/people', peopleRoute);
 app.use('/api/cases', casesRoute);
 app.use('/api/reports', reportsRoute);
+app.use('/api/custody', custodyRoute);
 
 // Central error handler — keep it last
 app.use((err, req, res, next) => {

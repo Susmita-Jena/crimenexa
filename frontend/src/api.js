@@ -25,5 +25,14 @@ export const fetchCases = () =>
 export const createCase = (payload) =>
   api.post('/cases', payload).then((r) => r.data);
 
+export const fetchCustody = (reportId) =>
+  api.get(`/custody/${reportId}`).then((r) => r.data);
+
+export const logCustodyEvent = (reportId, payload) =>
+  api.post(`/custody/${reportId}/event`, payload).then((r) => r.data);
+
+export const tamperDemo = (reportId) =>
+  api.post(`/custody/${reportId}/tamper-demo`).then((r) => r.data);
+
 export const fetchReports = () =>
   api.get('/reports').then((r) => r.data);

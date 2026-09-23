@@ -2,13 +2,16 @@ import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth, useTheme } from '../App';
 import { fetchCases } from '../api';
+import NotificationCenter from './notifications/NotificationCenter';
+import { AnalyzeIcon, CasesIcon, ChevronDownIcon, DashboardIcon, GraphIcon, MoonIcon, PeopleIcon, ShieldCheckIcon, SunIcon } from './icons/Icons';
 
 const LINKS = [
-  { to: '/dashboard', label: 'Dashboard', icon: '⌂' },
-  { to: '/graph', label: 'Network Graph', icon: '◎' },
-  { to: '/people', label: 'People', icon: '♙' },
-  { to: '/cases', label: 'Cases', icon: '▣' },
-  { to: '/analyze', label: 'Analyze Report', icon: '＋' }
+  { to: '/dashboard', label: 'Dashboard', Icon: DashboardIcon },
+  { to: '/graph', label: 'Network Graph', Icon: GraphIcon },
+  { to: '/people', label: 'People', Icon: PeopleIcon },
+  { to: '/cases', label: 'Cases', Icon: CasesIcon },
+  { to: '/analyze', label: 'Analyze Report', Icon: AnalyzeIcon },
+  { to: '/evidence-integrity', label: 'Evidence Integrity', Icon: ShieldCheckIcon }
 ];
 
 export default function Navbar() {
@@ -57,7 +60,7 @@ export default function Navbar() {
             to={link.to}
             className={({ isActive }) => 'navbar-link' + (isActive ? ' navbar-link-active' : '')}
           >
-            <span className="nav-link-icon" aria-hidden="true">{link.icon}</span>
+            <link.Icon className="nav-link-icon" />
             {link.label}
           </NavLink>
         ))}
@@ -71,6 +74,7 @@ export default function Navbar() {
 
       {user ? (
         <div className="navbar-user" ref={menuRef}>
+          <NotificationCenter />
           <button
             type="button"
             className="theme-toggle"
@@ -78,7 +82,7 @@ export default function Navbar() {
             aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
             title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
           >
-            <span aria-hidden="true">{theme === 'light' ? '☾' : '☀'}</span>
+            {theme === 'light' ? <MoonIcon /> : <SunIcon />}
             <span>{theme === 'light' ? 'Dark' : 'Light'}</span>
           </button>
           <button
@@ -90,7 +94,7 @@ export default function Navbar() {
           >
             <span className="account-avatar">{initials}</span>
             <span className="account-name">{user.name}</span>
-            <span className="account-caret">▾</span>
+            <ChevronDownIcon className="account-caret" />
           </button>
 
           {menuOpen && (
@@ -103,13 +107,13 @@ export default function Navbar() {
               </button>
               <button type="button" className="account-menu-item" onClick={() => {
                 setMenuOpen(false);
-                navigate('/dashboard');
+                navigate('/settings');
               }}>
                 Account Settings
               </button>
               <button type="button" className="account-menu-item" onClick={() => {
                 setMenuOpen(false);
-                navigate('/dashboard');
+                navigate('/activity');
               }}>
                 Activity / Recent Activity
               </button>

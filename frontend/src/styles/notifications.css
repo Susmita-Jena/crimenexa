@@ -1,0 +1,290 @@
+/* Notification bell, dropdown panel, and toast stack. Uses the app's theme tokens. */
+
+.notif-root {
+  position: relative;
+}
+
+.notif-bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #d9e2ee;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #42536e;
+  cursor: pointer;
+}
+
+.notif-bell:hover {
+  border-color: #b7c9e4;
+  color: var(--primary-strong);
+  background: #f5f8fe;
+}
+
+.notif-bell svg {
+  width: 16px;
+  height: 16px;
+}
+
+.notif-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--risk);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.notif-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 340px;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  z-index: 60;
+  overflow: hidden;
+}
+
+.notif-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.notif-mark-read {
+  border: 0;
+  background: transparent;
+  color: var(--primary-strong);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.notif-list {
+  overflow-y: auto;
+}
+
+.notif-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.notif-empty svg {
+  width: 26px;
+  height: 26px;
+  color: var(--success);
+}
+
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.notif-item:last-child {
+  border-bottom: 0;
+}
+
+.notif-item:hover {
+  background: var(--surface-alt);
+}
+
+.notif-item.is-unread {
+  background: var(--primary-soft);
+}
+
+.notif-item-icon {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+}
+
+.notif-item.is-high .notif-item-icon {
+  color: var(--risk);
+}
+
+.notif-item.is-medium .notif-item-icon {
+  color: var(--warning);
+}
+
+.notif-item.is-info .notif-item-icon {
+  color: var(--primary);
+}
+
+.notif-item-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.notif-item-text strong {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.notif-item-text span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.notif-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+/* toasts */
+
+.toast-stack {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  z-index: 80;
+  width: min(340px, calc(100vw - 40px));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 12px 12px 14px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  animation: toast-in 0.2s ease-out;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.toast.is-high {
+  border-left-color: var(--risk);
+}
+
+.toast.is-medium {
+  border-left-color: var(--warning);
+}
+
+.toast.is-info {
+  border-left-color: var(--primary);
+}
+
+.toast-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+}
+
+.toast.is-high .toast-icon {
+  color: var(--risk);
+}
+
+.toast.is-medium .toast-icon {
+  color: var(--warning);
+}
+
+.toast.is-info .toast-icon {
+  color: var(--primary);
+}
+
+.toast-text {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.toast-text strong {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.toast-text span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.toast-close {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.toast-close svg {
+  width: 12px;
+  height: 12px;
+}
+
+.toast-close:hover {
+  color: var(--text);
+}
+
+:root[data-theme='dark'] .notif-bell {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+:root[data-theme='dark'] .notif-bell:hover {
+  background: #223a5e;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
