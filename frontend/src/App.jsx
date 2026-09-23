@@ -16,7 +16,7 @@ import EvidenceIntegrity from './components/EvidenceIntegrity';
 import './App.css';
 import './styles/notifications.css';
 
-const AUTH_KEY = 'crimegraph-user';
+const AUTH_KEY = 'crimenexa-user';
 const THEME_KEY = 'crimenexa-theme';
 const demoAccounts = {
   investigator: { username: 'investigator@crimenexa.in', password: 'investigator123', label: 'Investigator' },
